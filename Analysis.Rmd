@@ -1,0 +1,112 @@
+---
+title: "Weather Data Preperation"
+output: html_document
+date: "2023-02-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## libraries
+
+```{r}
+library(httr)
+library(jsonlite)
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(readr)
+library(geosphere)
+library(ggplot2)
+library(lmtest)
+```
+
+
+```{r}
+Full_Data %>% 
+  mutate(after_29 = ifelse(after_29 == 1, "T1 - Post-€29", "T0 - Pre-€29"), # create more meaningful labels
+                treatment = ifelse(treatment == 1, "Berlin (Treatment)", "Hamburg (Control)")) %>%
+  group_by(after_29, treatment) %>% # group to extract means of each group at each time
+  filter(!is.na(AQ_NO2)) %>% 
+  filter(as.Date(date_and_time) > as.Date("2022-08-31")) %>% 
+  filter(AQ_type_of_station == "traffic", AQ_station_type_of_area == "urban", AQ_is_weekday == 1, AQ_is_peak_hour == 1) %>% 
+  mutate(group_mean = mean(AQ_NO2)) %>% # extract means of each group at each time
+ggplot(., aes(x = AQ_NO2, fill = factor(treatment))) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(name = " ", # changes to fill dimension
+                     values = c("#cc0055", "#a7a8aa"),
+                     labels = c("Treatment", "Control")) +
+  facet_grid(treatment~after_29) + # we specify the matrix (treatment and after_29)
+  geom_vline(aes(xintercept = group_mean), linetype = "longdash") + # add vertical line with the mean
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(x = "NO2 levels (µg/m³)",
+       y = "Density") 
+```
+
+```{r}
+Full_Data %>% 
+  mutate(after_29 = ifelse(after_29 == 1, "T1 - Post-€29", "T0 - Pre-€29"), # create more meaningful labels
+                treatment = ifelse(treatment == 1, "Berlin (Treatment)", "Hamburg (Control)")) %>%
+  group_by(after_29, treatment) %>% # group to extract means of each group at each time
+  filter(!is.na(AQ_NO2)) %>% 
+  filter(as.Date(date_and_time) > as.Date("2022-08-31")) %>% 
+  filter(AQ_type_of_station == "traffic", AQ_station_type_of_area == "urban", AQ_is_weekday == 1, AQ_is_peak_hour == 1) %>% 
+  mutate(group_mean = mean(log(AQ_NO2))) %>% # extract means of each group at each time
+ggplot(., aes(x = log(AQ_NO2), fill = factor(treatment))) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(name = " ", # changes to fill dimension
+                     values = c("#cc0055", "#a7a8aa"),
+                     labels = c("Treatment", "Control")) +
+  facet_grid(treatment~after_29) + # we specify the matrix (treatment and after_29)
+  geom_vline(aes(xintercept = group_mean), linetype = "longdash") + # add vertical line with the mean
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(x = "log NO2 levels (µg/m³)",
+       y = "Density") 
+```
+
+```{r}
+
+Full_Data %>% 
+  filter(as.Date(date_and_time) > as.Date("2022-08-31")) %>% 
+  filter(AQ_type_of_station == "traffic", AQ_station_type_of_area == "urban", AQ_is_weekday == 1, AQ_is_peak_hour == 1) %>% 
+  select(AQ_State, AQ_NO2, after_29) %>% 
+  filter(!is.na(AQ_NO2)) %>% 
+  group_by(AQ_State, after_29) %>% 
+  summarize(group_mean = mean(AQ_NO2))
+
+```
+
+```{r}
+
+model <- lm(AQ_NO2 ~ AQ_is_weekday + AQ_is_peak_hour + AQ_is_urban + AQ_is_traffic + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
+
+summary(model)
+```
+
+```{r}
+# Model including Public Subsidy
+
+model2 <- lm(AQ_NO2 ~ AQ_is_weekday + AQ_is_peak_hour + AQ_is_urban + AQ_is_traffic + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + transport_subsidy + (treatment*after_29), data = Full_Data)
+
+summary(model2)
+
+```
+```{r}
+par(mfrow=c(2,2))
+plot(model)
+
+```
+
+```{r}
+# Model DDD
+
+model3 <- lm(AQ_NO2 ~ AQ_is_weekday + AQ_is_peak_hour + AQ_is_urban + AQ_is_traffic + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + treatment + after_29 + transport_subsidy + (treatment*after_29) + (AQ_is_traffic*after_29) + (treatment*AQ_is_traffic) + (treatment*AQ_is_traffic*after_29) , data = Full_Data)
+
+summary(model3)
+
+```
+
+
