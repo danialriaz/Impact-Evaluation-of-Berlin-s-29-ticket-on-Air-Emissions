@@ -27,16 +27,52 @@ library(tidysynth)
 readRDS("Full_Data.rds")
 ```
 
+```{r}
+
+# Remove NA values
+
+# Filter out NA values for specific variables
+Full_Data <- Full_Data %>% 
+  filter(!is.na(AQ_NO2),
+         !is.na(FP_diesel_avg),
+         !is.na(W_precipitation), 
+         !is.na(W_air_temperature),
+         !is.na(W_wind_speed)
+         )
+
+
+
+#sum(is.na(Full_Data$W_air_temperature))
+
+
+```
+
+
+
+
+
+
+```{r}
+city_data <- Full_Data %>% 
+  filter(date_and_time >= as.POSIXct("2022-06-01 00:00:00")) %>% 
+  select(AQ_city, date_and_time, W_wind_speed, AQ_NO2, is_peak_hour) %>% 
+  group_by(AQ_city, date_and_time, is_peak_hour) %>% 
+  summarise(NO2 = mean(AQ_NO2, na.rm = T),
+         Wind_speed = mean(W_wind_speed, na.rm = T)) 
+  
+
+```
+
 
 
 ```{r,cache=T}
 
 berlin_synth <-
   
-  Full_Data %>%
+  city_data %>%
   
   # initial the synthetic control object
-  synthetic_control(outcome = AQ_NO2, # outcome
+  synthetic_control(outcome = NO2, # outcome
                     unit = AQ_city, # unit index in the panel data
                     time = date_and_time, # time index in the panel data
                     i_unit = "Berlin", # unit where the intervention occurred
@@ -47,9 +83,7 @@ berlin_synth <-
   # Generate the aggregate predictors used to fit the weights
   
   generate_predictor(time_window = as.Date("2021-09-01"):as.Date("2022-09-26"),
-                     AQ_is_weekday = mean(AQ_is_weekday, na.rm = T),
-                     AQ_is_peak_hour = mean(AQ_is_peak_hour, na.rm = T),
-                     AQ_is_urban = mean(AQ_is_urban, na.rm = T))%>%
+                     peak_hour = mean(is_peak_hour, na.rm = T)) %>% 
   
   # # average beer consumption in the donor pool from 1984 - 1988
   # generate_predictor(time_window = 1984:1988,
@@ -67,7 +101,7 @@ berlin_synth <-
   # Generate the fitted weights for the synthetic control
   generate_weights(optimization_window = as.Date("2021-09-01"):as.Date("2022-09-26"), # time to use in the optimization task
                    margin_ipop = .02,sigf_ipop = 7,bound_ipop = 6 # optimizer options
-  ) %>%
+  ) %>% 
   
   # Generate the synthetic control
   generate_control()
@@ -78,25 +112,51 @@ berlin_synth <-
 Once the synthetic control is generated, one can easily assess the fit by comparing the trends of the synthetic and observed time series.  The idea is that the trends in the pre-intervention period should map closely onto one another.
 
 ```{r,fig.align="center",fig.width=10,fig.height=5,dpi=300}
-smoking_out %>% plot_trends()
+berlin_synth %>% plot_trends()
 ```
 
-
-
-
-
-Not needed... 
 
 
 DD Regression
 
 ```{r}
 
-# model <- lm(AQ_NO2 ~ AQ_is_weekday + AQ_is_peak_hour + AQ_is_urban + AQ_is_traffic + AQ_city + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
-# 
-# summary(model)
+ model <- lm(AQ_NO2 ~ is_weekday + is_peak_hour + AQ_is_urban + AQ_is_traffic + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
+ 
+ summary(model)
 ```
 
+
+```{r}
+# Convert day_of_week and calendar_week to factor variables
+
+
+# Update the lm model with the factor variables
+model2 <- lm(AQ_NO2 ~ day_of_week + calendar_week + hour_of_day  + AQ_is_urban + AQ_is_traffic + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
+ 
+ summary(model2)
+```
+
+```{r}
+
+model3 <- lm(AQ_NO2 ~ day_of_week + calendar_week + hour_of_day  + AQ_city + AQ_is_urban + AQ_is_traffic + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
+ 
+ summary(model3)
+```
+
+```{r}
+
+model4 <- lm(AQ_NO2 ~ year + day_of_week + calendar_week + hour_of_day  + AQ_city + station_code + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
+ 
+ summary(model4)
+ 
+ 
+```
+
+
+
+
+Not needed... 
 
 DD Frequency Plots
 
