@@ -1,0 +1,250 @@
+---
+title: "Synth Control"
+output: html_document
+date: "2023-04-11"
+---
+
+```{r}
+
+library(dplyr)
+library(ggplot2)
+library(tidysynth)
+library(lubridate)
+library(SCtools)
+library(Synth)
+theme_set(theme_minimal())
+```
+
+
+
+```{r}
+
+#Full_Data2 <- Full_Data %>% 
+  #filter(!month(date_and_time) %in% c(6, 7, 8))
+
+# Remove NA values
+
+# Filter out NA values for specific variables
+Full_Data2 <- Full_Data2 %>% 
+  filter(!is.na(AQ_NO2),
+         !is.na(FP_diesel_avg),
+         !is.na(W_precipitation), 
+         !is.na(W_air_temperature),
+         !is.na(W_wind_speed)
+         )
+
+#sum(is.na(Full_Data$W_air_temperature))
+
+```
+
+
+
+```{r NO2-graph, fig.cap="Trend of NO2 in Berlin"}
+
+Full_Data2 %>% 
+  filter(AQ_city == "Berlin") %>% 
+  group_by(month = month(date_and_time), year = year(date_and_time)) %>% 
+  summarize(mean_NO2 = mean(AQ_NO2, na.rm = TRUE)) %>% 
+  ggplot(aes(x = as.Date(paste(year, month, "01", sep = "-")), y = mean_NO2)) +
+  geom_line() +
+  geom_vline(xintercept = as.Date("2022-09-27"), color = "orange") +
+  scale_x_date(date_labels = "%b %Y") +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y")
+
+```
+```{r fig.cap="Trends in Predictors in NO2"}
+Full_Data2 %>% 
+  filter(AQ_city == "Berlin") %>% 
+  select(FP_diesel_avg, W_wind_speed, W_precipitation, date_and_time) %>% 
+  tidyr::gather(predictor, value, -date_and_time) %>% 
+  mutate(month = month(date_and_time), year = year(date_and_time)) %>% 
+  group_by(predictor, month, year) %>% 
+  summarize(mean_value = mean(value, na.rm = TRUE)) %>% 
+  ggplot(aes(x = as.Date(paste(year, month, "01", sep = "-")), y = mean_value)) +
+  geom_line() +
+  facet_wrap(~predictor, scales = "free") +
+  coord_cartesian(ylim = c(0, NA))
+```
+
+```{r}
+
+# Create a numeric identifier for each city
+Full_Data2 <- Full_Data2 %>%
+  mutate(city_id = as.numeric(factor(AQ_city, levels = unique(AQ_city))))
+
+```
+```{r}
+
+control_cities <- as.integer(c(1, 3:10))
+
+```
+
+```{r}
+Full_Data3 <- Full_Data2 %>% 
+  select(AQ_city, date_and_time, AQ_NO2, city_id, FP_diesel_avg, W_wind_speed, W_precipitation) %>% 
+  group_by(AQ_city, city_id, date_and_time) %>% 
+  summarise(mean_NO2 = mean(AQ_NO2, na.rm = TRUE),
+         mean_FP = mean(FP_diesel_avg, na.rm = TRUE),
+         mean_Wspeed = mean(W_wind_speed, na.rm = TRUE),
+         mean_Wprec = mean(W_precipitation, na.rm = TRUE)
+         )
+
+
+```
+
+
+
+```{r}
+
+# Using precise dates as time stamps
+
+dataprep.out<-dataprep(
+	    foo = as.data.frame(Full_Data3),
+	    predictors = c("FP_diesel_avg",
+	                   "W_wind_speed",
+	                   "W_precipitation"),
+	    predictors.op = "mean",
+	    dependent = "AQ_NO2",
+	    unit.variable = "city_id",
+	    time.variable = "date_and_time",
+	    treatment.identifier = 2,
+	    controls.identifier = control_cities,
+	    time.predictors.prior = c(as.Date("2021-09-01"):as.Date("2022-09-27")),
+	    time.optimize.ssr =  c(as.Date("2021-09-01"):as.Date("2022-06-01")),
+	    special.predictors = list(
+      list("AQ_NO2", as.Date("2021-09-01"):as.Date("2022-06-01") ,"mean")),
+	    unit.names.variable = "AQ_city",
+	    time.plot = as.Date("2021-09-01"):as.Date("2023-03-31")
+	)
+
+```
+
+```{r}
+
+# Using month-year as time stamps
+
+Full_Data2$month_year <- paste(month(Full_Data2$date_and_time), year(Full_Data2$date_and_time), sep = "-")
+
+dataprep.out<-dataprep(
+	    foo = as.data.frame(Full_Data2),
+	    predictors = c("FP_diesel_avg",
+	                   "W_wind_speed",
+	                   "W_precipitation"),
+	    predictors.op = "mean",
+	    dependent = "AQ_NO2",
+	    unit.variable = "city_id",
+	    time.variable = "month_year",
+	    treatment.identifier = 2,
+	    controls.identifier = control_cities,
+	    time.predictors.prior = c("9-2021":"9-2022"),
+	    time.optimize.ssr =  c("9-2021":"9-2022"),
+	    special.predictors = list(
+      list("AQ_NO2", "9-2021":"9-2022" ,"mean")),
+	    unit.names.variable = "AQ_city",
+	    time.plot = "9-2021":"3-2023"
+	)
+
+```
+
+```{r}
+
+# Using a modified condensed data frame so that each city has only one value per hour of NO2
+
+Full_Data3 <- Full_Data2 %>% 
+  select(AQ_city, date_and_time, AQ_NO2, city_id, FP_diesel_avg, W_wind_speed, W_precipitation) %>% 
+  group_by(AQ_city, city_id, date_and_time) %>% 
+  summarise(mean_NO2 = mean(AQ_NO2, na.rm = TRUE),
+         mean_FP = mean(FP_diesel_avg, na.rm = TRUE),
+         mean_Wspeed = mean(W_wind_speed, na.rm = TRUE),
+         mean_Wprec = mean(W_precipitation, na.rm = TRUE)
+         )
+
+
+dataprep.out<-dataprep(
+	    foo = as.data.frame(Full_Data3),
+	    predictors = c("mean_FP",
+	                   "mean_Wspeed",
+	                   "mean_Wprec"),
+	    predictors.op = "mean",
+	    dependent = "mean_NO2",
+	    unit.variable = "city_id",
+	    time.variable = "date_and_time",
+	    treatment.identifier = 2,
+	    controls.identifier = control_cities,
+	    time.predictors.prior = c(as.Date("2021-09-01"):as.Date("2022-09-27")),
+	    time.optimize.ssr =  c(as.Date("2021-09-01"):as.Date("2022-06-01")),
+	    special.predictors = list(
+      list("mean_NO2", as.Date("2021-09-01"):as.Date("2022-06-01") ,"mean")),
+	    unit.names.variable = "AQ_city",
+	    time.plot = as.Date("2021-09-01"):as.Date("2023-03-31")
+	)
+
+```
+
+
+```{r}
+
+
+# Original Data with NAs
+
+
+# Create a numeric identifier for each city
+Full_Data <- Full_Data %>%
+  mutate(city_id = as.numeric(factor(AQ_city, levels = unique(AQ_city))))
+
+
+dataprep.out<-dataprep(
+	    foo = as.data.frame(Full_Data),
+	    predictors = c("FP_diesel_avg",
+	                   "W_wind_speed",
+	                   "W_precipitation"),
+	    predictors.op = "mean",
+	    dependent = "AQ_NO2",
+	    unit.variable = "city_id",
+	    time.variable = "date_and_time",
+	    treatment.identifier = 2,
+	    controls.identifier = control_cities,
+	    time.predictors.prior = c(as.Date("2021-09-01"):as.Date("2022-09-27")),
+	    time.optimize.ssr =  c(as.Date("2021-09-01"):as.Date("2022-06-01")),
+	    special.predictors = list(
+      list("AQ_NO2", as.Date("2021-09-01"):as.Date("2022-06-01") ,"mean")),
+	    unit.names.variable = "AQ_city",
+	    time.plot = as.Date("2021-09-01"):as.Date("2023-03-31")
+	)
+
+
+```
+```{r}
+
+# Check for any missing dates and times in my data
+
+# Create a sequence of hourly datetimes between 01 Jan 22 and 28 Feb 23
+all_datetimes <- seq(from = as.POSIXct("2021-09-01 00:00:00"), 
+                     to = as.POSIXct("2023-03-31 23:00:00"), 
+                     by = "hour")
+
+# Extract the datetime values from the dataframe - Replace Data Frame name to check
+actual_datetimes <- as.POSIXct(Full_Data$date_and_time)
+
+# Compare the two sequences and check if there are any missing datetimes
+missing_datetimes <- setdiff(all_datetimes, actual_datetimes)
+
+# Check if there are any missing datetimes
+if (length(missing_datetimes) == 0) {
+  print("There are no missing datetimes")
+} else {
+  print(paste("There are", length(missing_datetimes), "missing datetimes "))
+  print(as.POSIXct(missing_datetimes, origin = "1970-01-01"))
+  
+  # Fill in data with NAs for missing datetimes
+  for (i in missing_datetimes) {
+    Full_Data <- rbind(Full_Data, c(date_and_time = i, rep(NA, ncol(Full_Data)-1)))
+  }
+}
+
+
+# The only missing values are related to timezone change in Germany
+
+```
+
+
