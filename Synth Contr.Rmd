@@ -11,30 +11,18 @@ library(ggplot2)
 library(lubridate)
 library(SCtools)
 library(Synth)
+theme_set(theme_minimal())
 ```
-
-
 
 ```{r}
-
-# Remove NA values
-
-# Filter out NA values for specific variables
-Full_Data2 <- Full_Data %>% 
-  filter(!is.na(AQ_NO2),
-         !is.na(FP_diesel_avg),
-         !is.na(W_precipitation), 
-         !is.na(W_air_temperature),
-         !is.na(W_wind_speed)
-         )
+Full_Data <- readRDS("Full_Data.rds")
 
 ```
-
 
 
 ```{r NO2-graph, fig.cap="Trend of NO2 in Berlin"}
 
-Full_Data2 %>% 
+Full_Data %>% 
   filter(AQ_city == "Berlin") %>% 
   group_by(month = month(date_and_time), year = year(date_and_time)) %>% 
   summarize(mean_NO2 = mean(AQ_NO2, na.rm = TRUE)) %>% 
@@ -47,7 +35,7 @@ Full_Data2 %>%
 ```
 
 ```{r fig.cap="Trends in Predictors in NO2"}
-Full_Data2 %>% 
+Full_Data %>% 
   filter(AQ_city == "Berlin") %>% 
   select(FP_diesel_avg, W_wind_speed, W_precipitation, date_and_time) %>% 
   tidyr::gather(predictor, value, -date_and_time) %>% 
@@ -63,54 +51,41 @@ Full_Data2 %>%
 ```{r}
 
 # Create a numeric identifier for each city
-Full_Data2 <- Full_Data2 %>%
+Full_Data <- Full_Data %>%
   mutate(city_id = as.numeric(factor(AQ_city, levels = unique(AQ_city))))
 
-```
-
-```{r}
-
+# Create vector of control city ids
 control_cities <- as.integer(c(1, 3:10))
 
-```
+# Create an ungrouped list of comparison city names
+comparison_cities <- 
+unlist(
+  Full_Data %>% 
+  group_by(AQ_city) %>% 
+  filter(AQ_city != "Berlin") %>% 
+  summarize(AQ_city) %>% 
+  distinct()
+)
 
-```{r}
-
-# Using precise dates as time stamps
-
-dataprep.out<-dataprep(
-	    foo = as.data.frame(Full_Data2),
-	    predictors = c("FP_diesel_avg",
-	                   "W_wind_speed",
-	                   "W_precipitation"),
-	    predictors.op = "mean",
-	    dependent = "AQ_NO2",
-	    unit.variable = "city_id",
-	    time.variable = "date_and_time",
-	    treatment.identifier = 2,
-	    controls.identifier = control_cities,
-	    time.predictors.prior = c(as.Date("2021-09-01"):as.Date("2022-09-27")),
-	    time.optimize.ssr =  c(as.Date("2021-09-01"):as.Date("2022-06-01")),
-	    special.predictors = list(
-      list("AQ_NO2", as.Date("2021-09-01"):as.Date("2022-06-01") ,"mean")),
-	    unit.names.variable = "AQ_city",
-	    time.plot = as.Date("2021-09-01"):as.Date("2023-03-31")
-	)
 
 ```
 
+
 ```{r}
 
-# Transforming months to integer values
+# Transforming months to integer values and group data on a monthly granularity
 
-Full_Data4 <- Full_Data2 %>% 
+Full_Data2 <- Full_Data %>% 
   filter(!is.na(date_and_time)) %>%  # Filter out rows with missing date_and_time values
   mutate(city_id = as.numeric(factor(AQ_city, levels = unique(AQ_city))),
          month_year = floor_date(date_and_time, unit = "month"),
-         month_factor = as.integer(dense_rank(month_year))) %>% 
+         month_factor = as.integer(as.factor(dense_rank(month_year)))) %>% 
   group_by(city_id, AQ_city, month_year, month_factor) %>% 
   summarize(mean_NO2 = mean(AQ_NO2, na.rm = TRUE),
-            mean_FP = mean(FP_diesel_avg, na.rm = TRUE))
+            mean_FP = mean(FP_diesel_avg, na.rm = TRUE),
+            mean_WS = mean(W_wind_speed, na.rm = TRUE),
+            mean_T = mean(W_air_temperature, na.rm = TRUE)
+            )
 
 
 ```
@@ -120,23 +95,102 @@ Full_Data4 <- Full_Data2 %>%
 # Using my monthly grouped with integer levels
 
 dataprep.out<-dataprep(
-	    foo = as.data.frame(Full_Data4),
-	    predictors = c("mean_FP"),
+	    foo = as.data.frame(Full_Data2),
+	    predictors = c("mean_FP", "mean_WS", "mean_T"),
 	    predictors.op = "mean",
 	    dependent = "mean_NO2",
 	    unit.variable = "city_id",
-	    time.variable = "month_year",
+	    time.variable = "month_factor",
 	    treatment.identifier = 2,
 	    controls.identifier = control_cities,
 	    time.predictors.prior = c(1:14),
 	    time.optimize.ssr =  c(1:14),
 	    special.predictors = list(
-      list("AQ_NO2", 1:14,"mean")),
+      list("mean_NO2", 1:14,"mean")),
 	    unit.names.variable = "AQ_city",
 	    time.plot = 1:20
 	)
 
 ```
+
+```{r eval=FALSE}
+out <- synth(dataprep.out, Sigf.ipop = 3)
+```
+
+```{r}
+
+solution <- out$solution.w %>% 
+	as.data.frame()
+
+solution$city_id <- rownames(solution)
+
+solution %>% 
+	mutate(city_id = as.numeric(city_id)) %>% 
+	left_join(Full_Data4 %>% 
+	select(AQ_city,city_id) %>% 
+	filter(AQ_city %in% comparison_cities) %>% 
+		distinct(), by = "city_id") %>% 
+	ggplot(aes(reorder(AQ_city, w.weight), w.weight))+
+	geom_col()+
+	coord_flip()+
+	labs(
+		title = "Donor Weights by City",
+		y = NULL,
+		x = "Weight"
+	)
+```
+
+
+
+
+```{r fig.cap="Synthetic Russia vs Actual Russia for Alcohol Consumption per Capita"}
+path.plot(synth.res = out, dataprep.res = dataprep.out, 
+					Xlab = "NO2 patterns", )
+```
+
+
+```{r}
+delta_out <- (dataprep.out$Y1plot - (dataprep.out$Y0plot %*% out$solution.w)) %>% 
+	as.data.frame()
+
+delta_out$year <- rownames(delta_out)
+
+delta_out%>% 
+	knitr::kable(caption = "Difference in NO2 Between Synthetic and Actual Berlin", digits = 1)
+```
+
+
+
+```{r eval=FALSE}
+placebo <- generate.placebos(dataprep.out = dataprep.out,
+                             synth.out = out, strategy = "multicore")
+```
+
+Now that we have our placebo object, we can represent it graphically with `plot_placebos`. Here we can see our donors (control unit) and our actual treated group. 
+
+```{r fig.cap="Placebo Plot for Control Units"}
+plot_placebos(placebo)
+```
+
+
+Equally important we can test the Mean Squared Prediction Error (MSPE). Additionally, because we generated the controls for the placebos, we can see how extreme our values are and thus generate a pseudo p-value to see if our results are significant. Now, it should be mentioned that this test is relatively underpowered as it looks only at the donor states.
+
+```{r}
+test_out <- mspe.test(placebo)
+test_out$p.val
+```
+
+Why look at single number summary, when you can look at a plot? With `mspe.plot` we can visualise the ratios of MSPE for each donor. Here we see very little difference in Russia, which supports our higher p-value. 
+
+```{r fig.cap="Mean Squared Prediction Error Ratios for Russia and Donors"}
+mspe.plot(tdf = placebo)
+```
+
+
+
+
+
+
 ```{r}
 
 # Using as.Date on monthly groupings
