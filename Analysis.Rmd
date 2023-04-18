@@ -21,197 +21,63 @@ library(geosphere)
 library(ggplot2)
 library(lmtest)
 library(tidysynth)
+library(lubridate)
 ```
 
 ```{r}
 readRDS("Full_Data.rds")
 ```
 
-```{r}
-
-# Remove NA values
-
-# Filter out NA values for specific variables
-Full_Data <- Full_Data %>% 
-  filter(!is.na(AQ_NO2),
-         !is.na(FP_diesel_avg),
-         !is.na(W_precipitation), 
-         !is.na(W_air_temperature),
-         !is.na(W_wind_speed)
-         )
-
-
-
-#sum(is.na(Full_Data$W_air_temperature))
-
-
-```
-
-
-
-
 
 
 ```{r}
-city_data <- Full_Data %>% 
-  filter(date_and_time >= as.POSIXct("2022-06-01 00:00:00")) %>% 
-  select(AQ_city, date_and_time, W_wind_speed, AQ_NO2, is_peak_hour) %>% 
-  group_by(AQ_city, date_and_time, is_peak_hour) %>% 
-  summarise(NO2 = mean(AQ_NO2, na.rm = T),
-         Wind_speed = mean(W_wind_speed, na.rm = T)) 
-  
+
+# Modifying Seb's sol
+
+library(dplyr)
+library(estimatr)
+library(modelsummary)
+
+
+## Data for analysis (Only Berlin and Hamburg)
+did_df <- Full_Data %>% 
+  dplyr::filter(AQ_city %in% c("Berlin", "Hamburg")) %>% 
+  dplyr::mutate(summer_subsidy = ifelse(AQ_date %within% lubridate::interval("2022-06-01", "2022-08-31"), 1, 0))
+
+## Remove NAs
+did_df <- did_df %>% filter(!is.na(AQ_O3), !is.na(treatment), !is.na(after_29), !is.na(summer_subsidy), !is.na(FP_diesel_avg), !is.na(W_precipitation), !is.na(W_air_temperature), !is.na(W_wind_speed), !is.na(AQ_is_urban), !is.na(AQ_is_traffic), !is.na(station_code), !is.na(hour_of_day), !is.na(day_of_week), !is.na(calendar_week), !is.na(is_school_holiday))
+
+## Four model specifications
+did_model <- estimatr::lm_robust(AQ_NO2 ~ treatment * after_29, data = did_df)
+did_model_subsidy <- estimatr::lm_robust(AQ_NO2 ~ treatment * after_29 + summer_subsidy, data = did_df)
+did_model_subsidy_weather_controls <- estimatr::lm_robust(AQ_O3 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed, data = did_df)
+did_model_subsidy_weather_sensor_location_controls <- estimatr::lm_robust(AQ_O3 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + AQ_is_urban + AQ_is_traffic, data = did_df)
+
+did_model_subsidy_weather_sensor_location_controls_stations <- estimatr::lm_robust(AQ_O3 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + AQ_is_urban + AQ_is_traffic + station_code, data = did_df)
+
+
+# Two more models
+
+did_model_subsidy_weather_sensor_location_controls_stations_time <- estimatr::lm_robust(AQ_O3 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + AQ_is_urban + AQ_is_traffic + hour_of_day + day_of_week + calendar_week + is_school_holiday, data = did_df)
+
+did_model_subsidy_weather_sensor_location_controls_stations_time_noweek <- estimatr::lm_robust(AQ_O3 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + AQ_is_urban + AQ_is_traffic + hour_of_day + day_of_week + is_school_holiday, data = did_df)
+
+
+## Model output
+modelsummary::modelsummary(list("DiD"=did_model, 
+                                "DiD (9Euro)"=did_model_subsidy,
+                                "DiD (9Euro + Weather)"=did_model_subsidy_weather_controls, 
+                                "DiD (9Euro + Weather + Sensor)"=did_model_subsidy_weather_sensor_location_controls,
+                                "DiD (9Euro + Weather + Sensor + Stations)" = did_model_subsidy_weather_sensor_location_controls_stations,
+                                "DiD (9Euro + Weather + Sensor + Stations + Time)" = did_model_subsidy_weather_sensor_location_controls_stations_time,
+                                "DiD (9Euro + Weather + Sensor + Stations + Time_no_week)" =did_model_subsidy_weather_sensor_location_controls_stations_time_noweek),
+                           statistic = "conf.int",
+                           gof_omit="AIC|BIC|Log.Lik.",
+                           fmt = 2, 
+                           stars = c('*' = .05, '**' = .01, '***' = .001 ))
+
 
 ```
 
 
 
-```{r,cache=T}
-
-berlin_synth <-
-  
-  city_data %>%
-  
-  # initial the synthetic control object
-  synthetic_control(outcome = NO2, # outcome
-                    unit = AQ_city, # unit index in the panel data
-                    time = date_and_time, # time index in the panel data
-                    i_unit = "Berlin", # unit where the intervention occurred
-                    i_time = as.Date("2022-09-26"), # time period when the intervention occurred
-                    generate_placebos=T # generate placebo synthetic controls (for inference)
-                    ) %>%
-  
-  # Generate the aggregate predictors used to fit the weights
-  
-  generate_predictor(time_window = as.Date("2021-09-01"):as.Date("2022-09-26"),
-                     peak_hour = mean(is_peak_hour, na.rm = T)) %>% 
-  
-  # # average beer consumption in the donor pool from 1984 - 1988
-  # generate_predictor(time_window = 1984:1988,
-  #                    beer_sales = mean(beer, na.rm = T)) %>%
-  # 
-  # # Lagged cigarette sales 
-  # generate_predictor(time_window = 1975,
-  #                    cigsale_1975 = cigsale) %>%
-  # generate_predictor(time_window = 1980,
-  #                    cigsale_1980 = cigsale) %>%
-  # generate_predictor(time_window = 1988,
-  #                    cigsale_1988 = cigsale) %>%
-  # 
-  
-  # Generate the fitted weights for the synthetic control
-  generate_weights(optimization_window = as.Date("2021-09-01"):as.Date("2022-09-26"), # time to use in the optimization task
-                   margin_ipop = .02,sigf_ipop = 7,bound_ipop = 6 # optimizer options
-  ) %>% 
-  
-  # Generate the synthetic control
-  generate_control()
-```
-
-
-
-Once the synthetic control is generated, one can easily assess the fit by comparing the trends of the synthetic and observed time series.  The idea is that the trends in the pre-intervention period should map closely onto one another.
-
-```{r,fig.align="center",fig.width=10,fig.height=5,dpi=300}
-berlin_synth %>% plot_trends()
-```
-
-
-
-DD Regression
-
-```{r}
-
- model <- lm(AQ_NO2 ~ is_weekday + is_peak_hour + AQ_is_urban + AQ_is_traffic + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
- 
- summary(model)
-```
-
-
-```{r}
-# Convert day_of_week and calendar_week to factor variables
-
-
-# Update the lm model with the factor variables
-model2 <- lm(AQ_NO2 ~ day_of_week + calendar_week + hour_of_day  + AQ_is_urban + AQ_is_traffic + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
- 
- summary(model2)
-```
-
-```{r}
-
-model3 <- lm(AQ_NO2 ~ day_of_week + calendar_week + hour_of_day  + AQ_city + AQ_is_urban + AQ_is_traffic + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
- 
- summary(model3)
-```
-
-```{r}
-
-model4 <- lm(AQ_NO2 ~ year + day_of_week + calendar_week + hour_of_day  + AQ_city + station_code + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + is_school_holiday + treatment + after_29 + (treatment*after_29), data = Full_Data)
- 
- summary(model4)
- 
- 
-```
-
-
-
-
-Not needed... 
-
-DD Frequency Plots
-
-```{r}
-# Full_Data %>% 
-#   mutate(after_29 = ifelse(after_29 == 1, "T1 - Post-€29", "T0 - Pre-€29"), # create more meaningful labels
-#                 treatment = ifelse(treatment == 1, "Berlin (Treatment)", "Hamburg (Control)")) %>%
-#   group_by(after_29, treatment) %>% # group to extract means of each group at each time
-#   filter(!is.na(AQ_NO2)) %>% 
-#   filter(as.Date(date_and_time) > as.Date("2022-08-31")) %>% 
-#   filter(AQ_type_of_station == "traffic", AQ_station_type_of_area == "urban", AQ_is_weekday == 1, AQ_is_peak_hour == 1) %>% 
-#   mutate(group_mean = mean(AQ_NO2)) %>% # extract means of each group at each time
-# ggplot(., aes(x = AQ_NO2, fill = factor(treatment))) +
-#   geom_density(alpha = 0.5) +
-#   scale_fill_manual(name = " ", # changes to fill dimension
-#                      values = c("#cc0055", "#a7a8aa"),
-#                      labels = c("Treatment", "Control")) +
-#   facet_grid(treatment~after_29) + # we specify the matrix (treatment and after_29)
-#   geom_vline(aes(xintercept = group_mean), linetype = "longdash") + # add vertical line with the mean
-#   theme_bw() +
-#   theme(legend.position = "none") +
-#   labs(x = "NO2 levels (µg/m³)",
-#        y = "Density") 
-```
-
-```{r}
-# Full_Data %>% 
-#   mutate(after_29 = ifelse(after_29 == 1, "T1 - Post-€29", "T0 - Pre-€29"), # create more meaningful labels
-#                 treatment = ifelse(treatment == 1, "Berlin (Treatment)", "Hamburg (Control)")) %>%
-#   group_by(after_29, treatment) %>% # group to extract means of each group at each time
-#   filter(!is.na(AQ_NO2)) %>% 
-#   filter(as.Date(date_and_time) > as.Date("2022-08-31")) %>% 
-#   filter(AQ_type_of_station == "traffic", AQ_station_type_of_area == "urban", AQ_is_weekday == 1, AQ_is_peak_hour == 1) %>% 
-#   mutate(group_mean = mean(log(AQ_NO2))) %>% # extract means of each group at each time
-# ggplot(., aes(x = log(AQ_NO2), fill = factor(treatment))) +
-#   geom_density(alpha = 0.5) +
-#   scale_fill_manual(name = " ", # changes to fill dimension
-#                      values = c("#cc0055", "#a7a8aa"),
-#                      labels = c("Treatment", "Control")) +
-#   facet_grid(treatment~after_29) + # we specify the matrix (treatment and after_29)
-#   geom_vline(aes(xintercept = group_mean), linetype = "longdash") + # add vertical line with the mean
-#   theme_bw() +
-#   theme(legend.position = "none") +
-#   labs(x = "log NO2 levels (µg/m³)",
-#        y = "Density") 
-```
-
-```{r}
-# 
-# Full_Data %>% 
-#   filter(as.Date(date_and_time) > as.Date("2022-08-31")) %>% 
-#   filter(AQ_type_of_station == "traffic", AQ_station_type_of_area == "urban", AQ_is_weekday == 1, AQ_is_peak_hour == 1) %>% 
-#   select(AQ_State, AQ_NO2, after_29) %>% 
-#   filter(!is.na(AQ_NO2)) %>% 
-#   group_by(AQ_State, after_29) %>% 
-#   summarize(group_mean = mean(AQ_NO2))
-
-```
