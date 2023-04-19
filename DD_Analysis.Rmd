@@ -41,19 +41,19 @@ library(modelsummary)
 
 ## Data for analysis (Only Berlin and Hamburg)
 did_df <- Full_Data %>% 
-  dplyr::filter(AQ_city %in% c("Berlin", "Hamburg")) %>% 
+  dplyr::filter(AQ_city %in% c("Berlin", "Bremen")) %>% 
   dplyr::mutate(summer_subsidy = ifelse(AQ_date %within% lubridate::interval("2022-06-01", "2022-08-31"), 1, 0))
 
 ## Remove NAs
-did_df <- did_df %>% filter(!is.na(AQ_O3), !is.na(treatment), !is.na(after_29), !is.na(summer_subsidy), !is.na(FP_diesel_avg), !is.na(W_precipitation), !is.na(W_air_temperature), !is.na(W_wind_speed), !is.na(AQ_is_urban), !is.na(AQ_is_traffic), !is.na(station_code), !is.na(hour_of_day), !is.na(day_of_week), !is.na(calendar_week), !is.na(is_school_holiday))
+did_df <- did_df %>% filter(!is.na(AQ_NO2), !is.na(treatment), !is.na(after_29), !is.na(summer_subsidy), !is.na(FP_diesel_avg), !is.na(W_precipitation), !is.na(W_air_temperature), !is.na(W_wind_speed), !is.na(AQ_is_urban), !is.na(AQ_is_traffic), !is.na(station_code), !is.na(hour_of_day), !is.na(day_of_week), !is.na(calendar_week), !is.na(is_school_holiday))
 
 ## Four model specifications
 did_model <- estimatr::lm_robust(AQ_NO2 ~ treatment * after_29, data = did_df)
 did_model_subsidy <- estimatr::lm_robust(AQ_NO2 ~ treatment * after_29 + summer_subsidy, data = did_df)
-did_model_subsidy_weather_controls <- estimatr::lm_robust(AQ_O3 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed, data = did_df)
-did_model_subsidy_weather_sensor_location_controls <- estimatr::lm_robust(AQ_O3 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + AQ_is_urban + AQ_is_traffic, data = did_df)
+did_model_subsidy_weather_controls <- estimatr::lm_robust(AQ_NO2 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed, data = did_df)
+did_model_subsidy_weather_sensor_location_controls <- estimatr::lm_robust(AQ_NO2 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + AQ_is_urban + AQ_is_traffic, data = did_df)
 
-did_model_subsidy_weather_sensor_location_controls_stations <- estimatr::lm_robust(AQ_O3 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + AQ_is_urban + AQ_is_traffic + station_code, data = did_df)
+did_model_subsidy_weather_sensor_location_controls_stations <- estimatr::lm_robust(AQ_NO2 ~ treatment * after_29 + summer_subsidy + FP_diesel_avg + W_precipitation + W_air_temperature + W_wind_speed + AQ_is_urban + AQ_is_traffic + station_code, data = did_df)
 
 
 # Two more models
